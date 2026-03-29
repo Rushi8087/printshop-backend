@@ -130,47 +130,41 @@ class Admin(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='admin')
 
-# Initialize database
 with app.app_context():
     db.create_all()    
-    # Get admin credentials from environment variables
     admin_username = os.getenv('ADMIN_USERNAME', 'admin')
     admin_password = os.getenv('ADMIN_PASSWORD')
     if not admin_password:
-        raise RuntimeError("ADMIN_PASSWORD environment variable must be set")
+        print("⚠️ ADMIN_PASSWORD not set — skipping admin creation")
+        admin_password = None
     admin_email = os.getenv('ADMIN_EMAIL', 'admin@printshop.com')
     
     print(f"\n🔐 Admin account initialized")
     
-    # First, check if there's an admin with the same email but different username
-    admin_by_email = Admin.query.filter_by(email=admin_email).first()
-    admin_by_username = Admin.query.filter_by(username=admin_username).first()
-    
-    if admin_by_email and admin_by_email.username != admin_username:
-        # Email exists with different username - update the username
-        print(f"⚠️  Found admin with email {admin_email} but username '{admin_by_email.username}'")
-        print(f"   Updating username to '{admin_username}'")
-        admin_by_email.username = admin_username
-        admin_by_email.password_hash = generate_password_hash(admin_password)
-        db.session.commit()
-        print(f"✅ Admin user updated: {admin_username}")
-    elif admin_by_username:
-        # Username exists - just update password and email
-        print(f"✅ Admin user found: {admin_username}")
-        admin_by_username.email = admin_email
-        admin_by_username.password_hash = generate_password_hash(admin_password)
-        db.session.commit()
-        print(f"✅ Admin credentials updated")
-    else:
-        # No admin exists - create new one
-        admin = Admin(
-            username=admin_username,
-            email=admin_email,
-            password_hash=generate_password_hash(admin_password)
-        )
-        db.session.add(admin)
-        db.session.commit()
-        print(f"✅ Admin user created: {admin_username}")
+    if admin_password:  # ← ADD THIS LINE
+        # First, check if there's an admin with the same email but different username
+        admin_by_email = Admin.query.filter_by(email=admin_email).first()
+        admin_by_username = Admin.query.filter_by(username=admin_username).first()
+        
+        if admin_by_email and admin_by_email.username != admin_username:
+            admin_by_email.username = admin_username
+            admin_by_email.password_hash = generate_password_hash(admin_password)
+            db.session.commit()
+            print(f"✅ Admin user updated: {admin_username}")
+        elif admin_by_username:
+            admin_by_username.email = admin_email
+            admin_by_username.password_hash = generate_password_hash(admin_password)
+            db.session.commit()
+            print(f"✅ Admin credentials updated")
+        else:
+            admin = Admin(
+                username=admin_username,
+                email=admin_email,
+                password_hash=generate_password_hash(admin_password)
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print(f"✅ Admin user created: {admin_username}")
 
 # ============ WHATSAPP OTP SYSTEM ============
 whatsapp_otps = {}
