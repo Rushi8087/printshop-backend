@@ -18,7 +18,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
 import re
-
+from flask_mail import Mail, Message
 def validate_session_id(session_id: str) -> bool:
     """Only allow alphanumeric + underscore, max 50 chars"""
     return bool(re.match(r'^[A-Z0-9_]{1,50}$', session_id))
@@ -66,6 +66,13 @@ if database_url.startswith('postgres://'):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY') or secrets.token_hex(32)
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_EMAIL')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_EMAIL')
+mail = Mail(app)
 # Raise hard error in production if not set:
 if not os.getenv('JWT_SECRET_KEY'):
     import warnings
@@ -172,7 +179,7 @@ whatsapp_otps = {}
 @jwt_required()
 @limiter.limit("3 per minute")
 def send_whatsapp_otp():
-    """Send OTP to WhatsApp number for verification"""
+    """Send OTP to shop email for WhatsApp number verification"""
     try:
         identity = get_jwt_identity()
         shop_id = int(identity) if isinstance(identity, str) else identity
@@ -190,7 +197,7 @@ def send_whatsapp_otp():
                 'error': 'Please enter a valid 10-digit phone number'
             }), 400
 
-        # Eviction block — only ONCE, only here
+        # Eviction block
         if len(whatsapp_otps) > 10000:
             now = datetime.utcnow()
             expired = [k for k, v in whatsapp_otps.items() if now > v['expires_at']]
@@ -207,20 +214,31 @@ def send_whatsapp_otp():
         }
 
         print(f"📱 OTP generated for shop: {shop.shop_name}")
-        if os.getenv('FLASK_DEBUG', 'false').lower() == 'true':
-            print(f"   [DEV ONLY] OTP: {otp}")
+
+        # Send OTP to shop's registered email
+        try:
+            msg = Message(
+                subject="Your PrintShop WhatsApp Verification OTP",
+                recipients=[shop.email],
+                body=f"Hello {shop.shop_name},\n\nYour OTP for verifying WhatsApp number {whatsapp_number} is: {otp}\n\nValid for 10 minutes.\nDo not share this with anyone."
+            )
+            mail.send(msg)
+            print(f"✅ OTP email sent to {shop.email}")
+        except Exception as mail_error:
+            print(f"❌ Email send failed: {mail_error}")
+            return jsonify({'success': False, 'error': 'Failed to send OTP email. Please try again.'}), 500
 
         return jsonify({
             'success': True,
-            'message': 'OTP sent successfully to WhatsApp',
+            'message': f'OTP sent to your registered email ({shop.email})',
         }), 200
 
     except Exception as e:
         print(f"Send WhatsApp OTP error: {str(e)}")
         import traceback
         traceback.print_exc()
-        print(f"Error: {str(e)}")   # keep the real error in your Railway logs
         return jsonify({'success': False, 'error': 'An unexpected error occurred'}), 500
+    
 @app.route('/api/shop/verify-whatsapp-otp', methods=['POST'])
 @jwt_required()
 def verify_whatsapp_otp():
@@ -323,8 +341,6 @@ def forgot_password():
 
         shop = Shop.query.filter_by(email=email).first()
 
-        # Always return the same response whether email exists or not
-        # This prevents attackers from knowing which emails are registered
         if not shop:
             return jsonify({
                 'success': True,
@@ -340,14 +356,20 @@ def forgot_password():
             'expires_at': datetime.utcnow() + timedelta(minutes=10)
         }
 
-        # ── Safe log — no OTP value, no sensitive data ──
-        print(f"🔐 Reset code generated for shop: {shop.shop_name} (expires in 10 min)")
+        print(f"🔐 Reset code generated for shop: {shop.shop_name}")
 
-        # ── TODO: Send code via real email service here ──
-        # e.g. send_email(to=email, subject="Reset Code", body=f"Your code: {code}")
-        # For development only — remove this print in production:
-        if os.getenv('FLASK_DEBUG', 'false').lower() == 'true':
-            print(f"   [DEV ONLY] Code: {code}")
+        # Send email
+        try:
+            msg = Message(
+                subject="Your PrintShop Password Reset Code",
+                recipients=[email],
+                body=f"Hello {shop.shop_name},\n\nYour password reset code is: {code}\n\nValid for 10 minutes.\nIgnore if you didn't request this."
+            )
+            mail.send(msg)
+            print(f"✅ Reset code email sent to {email}")
+        except Exception as mail_error:
+            print(f"❌ Email send failed: {mail_error}")
+            return jsonify({'success': False, 'error': 'Failed to send reset email. Please try again.'}), 500
 
         return jsonify({
             'success': True,
@@ -358,7 +380,6 @@ def forgot_password():
         print(f"Forgot password error: {e}")
         import traceback
         traceback.print_exc()
-        print(f"Error: {str(e)}")   # keep the real error in your Railway logs
         return jsonify({'success': False, 'error': 'An unexpected error occurred'}), 500
     
 @app.route('/api/shop/verify-reset-code', methods=['POST'])

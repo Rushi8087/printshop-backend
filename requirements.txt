@@ -11,3 +11,4 @@ psycopg2-binary==2.9.9
 pytz==2024.1
 flask-limiter==3.5.0
 gunicorn==21.2.0
+Flask-Mail
